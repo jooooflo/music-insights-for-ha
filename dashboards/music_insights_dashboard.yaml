@@ -17,10 +17,11 @@ views:
     path: music-insights
     icon: mdi:music-box-multiple
     cards:
-      - type: tile
+      - type: picture-entity
         entity: sensor.spotify_flo_ue_currently_playing
         name: Currently playing
-        icon: mdi:spotify
+        show_state: true
+        show_name: true
 
       - type: entities
         title: Currently playing – Details
@@ -69,32 +70,32 @@ views:
 
       - type: horizontal-stack
         cards:
-          - type: entities
+          - type: glance
             title: Top Songs
-            show_header_toggle: false
+            show_name: true
+            show_state: true
+            show_icon: true
+            state_color: false
             entities:
               - entity: sensor.spotify_flo_ue_top_track_short_term
-                name: Letzte 4 Wochen
-                icon: mdi:music-note
+                name: 4 Wochen
               - entity: sensor.garage_spotify_flo_ue_top_track_medium_term
-                name: Letzte 6 Monate
-                icon: mdi:music-note
+                name: 6 Monate
               - entity: sensor.garage_spotify_flo_ue_top_track_long_term
                 name: Gesamt
-                icon: mdi:music-note
-          - type: entities
+          - type: glance
             title: Top Artists
-            show_header_toggle: false
+            show_name: true
+            show_state: true
+            show_icon: true
+            state_color: false
             entities:
               - entity: sensor.spotify_flo_ue_top_artist_short_term
-                name: Letzte 4 Wochen
-                icon: mdi:account-music
+                name: 4 Wochen
               - entity: sensor.garage_spotify_flo_ue_top_artist_medium_term
-                name: Letzte 6 Monate
-                icon: mdi:account-music
+                name: 6 Monate
               - entity: sensor.garage_spotify_flo_ue_top_artist_long_term
                 name: Gesamt
-                icon: mdi:account-music
 
       - type: entities
         title: Diagnose
