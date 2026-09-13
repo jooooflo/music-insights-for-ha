@@ -17,11 +17,10 @@ views:
     path: music-insights
     icon: mdi:music-box-multiple
     cards:
-      - type: picture-entity
+      - type: tile
         entity: sensor.spotify_flo_ue_currently_playing
         name: Currently playing
-        show_state: true
-        show_name: true
+        vertical: false
 
       - type: entities
         title: Currently playing – Details
