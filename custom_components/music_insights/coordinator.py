@@ -41,6 +41,21 @@ from .storage import MusicInsightsStore, PlaySessionData, TopItemEntry, TrackDat
 _LOGGER = logging.getLogger(__name__)
 
 
+def pick_image_url(images: list[dict] | None) -> str | None:
+    """Pick a reasonably-sized cover image from Spotify's images array.
+
+    Spotify returns images largest-first (typically 640/300/64px). A
+    dashboard thumbnail doesn't need full resolution, so prefer something
+    close to 300px; fall back to whatever is available.
+    """
+    if not images:
+        return None
+    for image in images:
+        if image.get("width") and 200 <= image["width"] <= 400:
+            return image.get("url")
+    return images[0].get("url")
+
+
 def _track_from_spotify_item(item: dict) -> TrackData:
     album = item.get("album") or {}
     artists = item.get("artists") or []
@@ -52,6 +67,7 @@ def _track_from_spotify_item(item: dict) -> TrackData:
         album_external_id=album.get("id"),
         album_name=album.get("name"),
         album_release_date=album.get("release_date"),
+        album_image_url=pick_image_url(album.get("images")),
         artist_external_ids=[a["id"] for a in artists if a.get("id")],
         artist_names=[a.get("name", "") for a in artists],
         metadata={"popularity": item.get("popularity")} if "popularity" in item else None,
@@ -302,8 +318,12 @@ class MusicInsightsTopItemsCoordinator(DataUpdateCoordinator[dict]):
                 artist_ids = []
                 artist_entries = []
                 for rank, item in enumerate(payload["artists"].get("items", []), start=1):
+                    image_url = pick_image_url(item.get("images"))
                     artist_id = self._store.upsert_artist(
-                        "spotify", item["id"], item.get("name", item["id"])
+                        "spotify",
+                        item["id"],
+                        item.get("name", item["id"]),
+                        {"image_url": image_url} if image_url else None,
                     )
                     artist_ids.append(artist_id)
                     artist_entries.append(TopItemEntry(external_id=item["id"], rank=rank))

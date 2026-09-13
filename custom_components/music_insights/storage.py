@@ -65,6 +65,7 @@ class TrackData:
     album_external_id: str | None = None
     album_name: str | None = None
     album_release_date: str | None = None
+    album_image_url: str | None = None
     artist_external_ids: Sequence[str] = ()
     artist_names: Sequence[str] = ()
     metadata: dict[str, Any] | None = None
@@ -534,11 +535,15 @@ class MusicInsightsStore:
 
         album_id = None
         if track.album_external_id:
+            album_metadata = (
+                {"image_url": track.album_image_url} if track.album_image_url else None
+            )
             album_id = self.upsert_album(
                 track.provider,
                 track.album_external_id,
                 track.album_name or track.album_external_id,
                 track.album_release_date,
+                album_metadata,
             )
 
         with self.conn:

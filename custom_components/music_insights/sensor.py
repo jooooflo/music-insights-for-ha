@@ -1,6 +1,7 @@
 """Sensor entities for Music Insights (MI-HA) v0.1."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
@@ -13,8 +14,18 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import MusicInsightsConfigEntry
 from .const import DOMAIN, TOP_ITEM_TERMS
+from .coordinator import pick_image_url
 
 _ATTRIBUTION = "Data provided by Spotify"
+
+
+def _image_url_from_metadata(metadata_json: str | None) -> str | None:
+    if not metadata_json:
+        return None
+    try:
+        return json.loads(metadata_json).get("image_url")
+    except (json.JSONDecodeError, AttributeError):
+        return None
 
 
 async def async_setup_entry(
@@ -76,6 +87,12 @@ class CurrentlyPlayingSensor(CoordinatorEntity, SensorEntity):
             "device": (data.get("device") or {}).get("name"),
         }
 
+    @property
+    def entity_picture(self) -> str | None:
+        item = (self.coordinator.data or {}).get("item") or {}
+        album = item.get("album") or {}
+        return pick_image_url(album.get("images"))
+
 
 class _StoreBackedSensor(SensorEntity):
     """Base class for sensors that read aggregated data from the DB.
@@ -96,6 +113,7 @@ class _StoreBackedSensor(SensorEntity):
         self._attr_device_info = device_info
         self._value: str | int | float | None = None
         self._attrs: dict = {}
+        self._picture: str | None = None
 
     @property
     def native_value(self):
@@ -104,6 +122,10 @@ class _StoreBackedSensor(SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         return self._attrs
+
+    @property
+    def entity_picture(self) -> str | None:
+        return self._picture
 
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(
@@ -198,9 +220,10 @@ class TopTrackSensor(_StoreBackedSensor):
         account_id = store.upsert_account("spotify", self._data.account_external_id, None)
         row = store.fetchone(
             """
-            SELECT t.name AS track_name, t.id AS track_id
+            SELECT t.name AS track_name, al.metadata_json AS album_metadata_json
             FROM top_items_snapshots s
             JOIN tracks t ON t.id = s.item_id
+            LEFT JOIN albums al ON al.id = t.album_id
             WHERE s.account_id = ? AND s.term = ? AND s.item_type = 'tracks'
             ORDER BY s.captured_at DESC, s.rank ASC LIMIT 1
             """,
@@ -208,6 +231,7 @@ class TopTrackSensor(_StoreBackedSensor):
         )
         self._value = row["track_name"] if row else None
         self._attrs = {"term": self._term}
+        self._picture = _image_url_from_metadata(row["album_metadata_json"] if row else None)
 
 
 class TopArtistSensor(_StoreBackedSensor):
@@ -224,7 +248,7 @@ class TopArtistSensor(_StoreBackedSensor):
         account_id = store.upsert_account("spotify", self._data.account_external_id, None)
         row = store.fetchone(
             """
-            SELECT a.name AS artist_name
+            SELECT a.name AS artist_name, a.metadata_json AS artist_metadata_json
             FROM top_items_snapshots s
             JOIN artists a ON a.id = s.item_id
             WHERE s.account_id = ? AND s.term = ? AND s.item_type = 'artists'
@@ -234,6 +258,7 @@ class TopArtistSensor(_StoreBackedSensor):
         )
         self._value = row["artist_name"] if row else None
         self._attrs = {"term": self._term}
+        self._picture = _image_url_from_metadata(row["artist_metadata_json"] if row else None)
 
 
 class RecentlyPlayedSyncSensor(CoordinatorEntity, SensorEntity):
