@@ -1,0 +1,104 @@
+# Music Insights (MI-HA) - example dashboard
+#
+# How to use:
+# 1. In Home Assistant: Settings -> Dashboards -> "+ Add Dashboard" ->
+#    "New dashboard from scratch". Give it a title (e.g. "Music Insights").
+# 2. Open the new dashboard -> pencil icon (top right, edit mode) ->
+#    the ⋮ menu (top right) -> "Edit in YAML" -> replace the content with
+#    everything below -> Save.
+#
+# Entity IDs below match this specific installation (device title
+# "Spotify (Flo Ü)"). If you set this up fresh, replace the entity_id
+# values with your own - find them under Settings -> Devices & Services ->
+# Music Insights (MI-HA) -> the device -> entity list.
+title: Music Insights
+views:
+  - title: Music Insights
+    path: music-insights
+    icon: mdi:music-box-multiple
+    cards:
+      - type: tile
+        entity: sensor.spotify_flo_ue_currently_playing
+        name: Currently playing
+        icon: mdi:spotify
+
+      - type: entities
+        title: Currently playing – Details
+        show_header_toggle: false
+        entities:
+          - type: attribute
+            entity: sensor.spotify_flo_ue_currently_playing
+            attribute: album
+            name: Album
+          - type: attribute
+            entity: sensor.spotify_flo_ue_currently_playing
+            attribute: device
+            name: Gerät
+          - type: attribute
+            entity: sensor.spotify_flo_ue_currently_playing
+            attribute: is_playing
+            name: Spielt gerade
+
+      - type: horizontal-stack
+        cards:
+          - type: tile
+            entity: sensor.spotify_flo_ue_listening_time_today
+            name: Heute
+            icon: mdi:clock-outline
+          - type: tile
+            entity: sensor.spotify_flo_ue_listening_time_this_year
+            name: Dieses Jahr
+            icon: mdi:calendar-clock
+
+      - type: entities
+        title: Jahresstatistik
+        show_header_toggle: false
+        entities:
+          - type: attribute
+            entity: sensor.spotify_flo_ue_listening_time_this_year
+            attribute: play_count
+            name: Wiedergaben
+          - type: attribute
+            entity: sensor.spotify_flo_ue_listening_time_this_year
+            attribute: unique_tracks
+            name: Unterschiedliche Songs
+          - type: attribute
+            entity: sensor.spotify_flo_ue_listening_time_this_year
+            attribute: unique_artists
+            name: Unterschiedliche Artists
+
+      - type: horizontal-stack
+        cards:
+          - type: entities
+            title: Top Songs
+            show_header_toggle: false
+            entities:
+              - entity: sensor.spotify_flo_ue_top_track_short_term
+                name: Letzte 4 Wochen
+                icon: mdi:music-note
+              - entity: sensor.garage_spotify_flo_ue_top_track_medium_term
+                name: Letzte 6 Monate
+                icon: mdi:music-note
+              - entity: sensor.garage_spotify_flo_ue_top_track_long_term
+                name: Gesamt
+                icon: mdi:music-note
+          - type: entities
+            title: Top Artists
+            show_header_toggle: false
+            entities:
+              - entity: sensor.spotify_flo_ue_top_artist_short_term
+                name: Letzte 4 Wochen
+                icon: mdi:account-music
+              - entity: sensor.garage_spotify_flo_ue_top_artist_medium_term
+                name: Letzte 6 Monate
+                icon: mdi:account-music
+              - entity: sensor.garage_spotify_flo_ue_top_artist_long_term
+                name: Gesamt
+                icon: mdi:account-music
+
+      - type: entities
+        title: Diagnose
+        show_header_toggle: false
+        entities:
+          - entity: sensor.spotify_flo_ue_recently_played_sync
+            name: Letzter Abgleich
