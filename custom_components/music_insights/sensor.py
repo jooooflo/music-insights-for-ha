@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from homeassistant.components.sensor import SensorEntity
-from homeassistant.const import EntityCategory
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.const import EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity import DeviceInfo
@@ -12,7 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import MusicInsightsConfigEntry
-from .const import DOMAIN
+from .const import DOMAIN, TOP_ITEM_TERMS
 
 _ATTRIBUTION = "Data provided by Spotify"
 
@@ -36,10 +36,11 @@ async def async_setup_entry(
         CurrentlyPlayingSensor(data.playback_coordinator, entry, device_info),
         TodayListeningTimeSensor(data, entry, device_info),
         YearListeningTimeSensor(data, entry, device_info),
-        TopTrackSensor(data, entry, device_info, term="short_term"),
-        TopArtistSensor(data, entry, device_info, term="short_term"),
         RecentlyPlayedSyncSensor(data.recently_played_coordinator, entry, device_info),
     ]
+    for term in TOP_ITEM_TERMS:
+        entities.append(TopTrackSensor(data, entry, device_info, term=term))
+        entities.append(TopArtistSensor(data, entry, device_info, term=term))
     async_add_entities(entities)
 
 
@@ -123,7 +124,9 @@ class _StoreBackedSensor(SensorEntity):
 
 class TodayListeningTimeSensor(_StoreBackedSensor):
     _attr_name = "Listening time today"
-    _attr_native_unit_of_measurement = "min"
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:clock-outline"
 
     def __init__(self, data, entry, device_info) -> None:
@@ -149,7 +152,9 @@ class TodayListeningTimeSensor(_StoreBackedSensor):
 
 class YearListeningTimeSensor(_StoreBackedSensor):
     _attr_name = "Listening time this year"
-    _attr_native_unit_of_measurement = "min"
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:calendar-clock"
 
     def __init__(self, data, entry, device_info) -> None:
