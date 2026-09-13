@@ -1,0 +1,10 @@
+create_snapshot:
+run_integrity_check:
+export_data:
+import_legacy_jsonl:
+  fields:
+    path:
+      required: false
+      example: "/config/spotify_history.jsonl"
+      selector:
+        text:

@@ -1,0 +1,50 @@
+{
+  "config": {
+    "step": {
+      "pick_implementation": {
+        "title": "Choose an authentication method"
+      }
+    },
+    "abort": {
+      "already_configured": "This Spotify account is already configured.",
+      "already_in_progress": "Configuration is already in progress.",
+      "oauth_error": "Invalid authentication response, please try again.",
+      "oauth_failed": "Error while obtaining an access token.",
+      "oauth_timeout": "Authentication timed out, please try again.",
+      "oauth_unauthorized": "Application Credentials for Spotify are not registered.",
+      "missing_configuration": "The Spotify integration is not configured. Set up Application Credentials first.",
+      "authorize_url_timeout": "Timeout generating the authorize URL.",
+      "no_url_available": "No URL available. For information about this error, check the help section."
+    },
+    "create_entry": {
+      "default": "Successfully connected to Spotify."
+    }
+  },
+  "application_credentials": {
+    "description": "Follow the [Spotify Developer Dashboard]({developer_dashboard_url}) to create an app and obtain a Client ID and Client Secret. Add `{redirect_url}` as a Redirect URI in the app settings."
+  },
+  "services": {
+    "create_snapshot": {
+      "name": "Create snapshot",
+      "description": "Creates an on-disk snapshot of the Music Insights database."
+    },
+    "run_integrity_check": {
+      "name": "Run integrity check",
+      "description": "Runs a SQLite integrity and foreign-key check on the Music Insights database."
+    },
+    "export_data": {
+      "name": "Export data",
+      "description": "Exports all stored listening data for each account to a JSON file."
+    },
+    "import_legacy_jsonl": {
+      "name": "Import legacy JSONL history",
+      "description": "Imports play history from the prototype's spotify_history.jsonl file.",
+      "fields": {
+        "path": {
+          "name": "Path",
+          "description": "Full path to the JSONL file. Defaults to /config/spotify_history.jsonl."
+        }
+      }
+    }
+  }
+}

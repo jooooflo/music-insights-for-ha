@@ -1,0 +1,50 @@
+{
+  "config": {
+    "step": {
+      "pick_implementation": {
+        "title": "Authentifizierungsmethode wählen"
+      }
+    },
+    "abort": {
+      "already_configured": "Dieses Spotify-Konto ist bereits eingerichtet.",
+      "already_in_progress": "Die Einrichtung läuft bereits.",
+      "oauth_error": "Ungültige Authentifizierungsantwort, bitte erneut versuchen.",
+      "oauth_failed": "Fehler beim Abrufen eines Zugriffstokens.",
+      "oauth_timeout": "Zeitüberschreitung bei der Authentifizierung, bitte erneut versuchen.",
+      "oauth_unauthorized": "Für Spotify sind keine Anwendungsanmeldedaten registriert.",
+      "missing_configuration": "Die Spotify-Integration ist nicht konfiguriert. Bitte zuerst Anwendungsanmeldedaten einrichten.",
+      "authorize_url_timeout": "Zeitüberschreitung beim Erzeugen der Autorisierungs-URL.",
+      "no_url_available": "Keine URL verfügbar. Weitere Informationen im Hilfebereich."
+    },
+    "create_entry": {
+      "default": "Erfolgreich mit Spotify verbunden."
+    }
+  },
+  "application_credentials": {
+    "description": "Erstelle im [Spotify Developer Dashboard]({developer_dashboard_url}) eine App und notiere dir Client-ID und Client-Secret. Trage `{redirect_url}` als Redirect-URI in den App-Einstellungen ein."
+  },
+  "services": {
+    "create_snapshot": {
+      "name": "Snapshot erstellen",
+      "description": "Erstellt eine Sicherungskopie der Music-Insights-Datenbank."
+    },
+    "run_integrity_check": {
+      "name": "Integritätsprüfung ausführen",
+      "description": "Führt eine SQLite-Integritäts- und Fremdschlüsselprüfung der Music-Insights-Datenbank aus."
+    },
+    "export_data": {
+      "name": "Daten exportieren",
+      "description": "Exportiert alle gespeicherten Hördaten je Konto in eine JSON-Datei."
+    },
+    "import_legacy_jsonl": {
+      "name": "Alte JSONL-Historie importieren",
+      "description": "Importiert Hörverlauf aus der spotify_history.jsonl-Datei des Prototyps.",
+      "fields": {
+        "path": {
+          "name": "Pfad",
+          "description": "Vollständiger Pfad zur JSONL-Datei. Standard: /config/spotify_history.jsonl."
+        }
+      }
+    }
+  }
+}
