@@ -87,11 +87,15 @@ class CurrentlyPlayingSensor(CoordinatorEntity, SensorEntity):
             "device": (data.get("device") or {}).get("name"),
         }
 
-    @property
-    def entity_picture(self) -> str | None:
+    def _handle_coordinator_update(self) -> None:
+        # entity_picture must be set via _attr_entity_picture, not as an
+        # overridden property - Entity.entity_picture is a cached_property
+        # in current HA, and a plain @property override is silently not
+        # picked up by the state-attribute writer.
         item = (self.coordinator.data or {}).get("item") or {}
         album = item.get("album") or {}
-        return pick_image_url(album.get("images"))
+        self._attr_entity_picture = pick_image_url(album.get("images"))
+        super()._handle_coordinator_update()
 
 
 class _StoreBackedSensor(SensorEntity):
@@ -113,7 +117,6 @@ class _StoreBackedSensor(SensorEntity):
         self._attr_device_info = device_info
         self._value: str | int | float | None = None
         self._attrs: dict = {}
-        self._picture: str | None = None
 
     @property
     def native_value(self):
@@ -122,10 +125,6 @@ class _StoreBackedSensor(SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         return self._attrs
-
-    @property
-    def entity_picture(self) -> str | None:
-        return self._picture
 
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(
@@ -231,7 +230,7 @@ class TopTrackSensor(_StoreBackedSensor):
         )
         self._value = row["track_name"] if row else None
         self._attrs = {"term": self._term}
-        self._picture = _image_url_from_metadata(row["album_metadata_json"] if row else None)
+        self._attr_entity_picture = _image_url_from_metadata(row["album_metadata_json"] if row else None)
 
 
 class TopArtistSensor(_StoreBackedSensor):
@@ -258,7 +257,7 @@ class TopArtistSensor(_StoreBackedSensor):
         )
         self._value = row["artist_name"] if row else None
         self._attrs = {"term": self._term}
-        self._picture = _image_url_from_metadata(row["artist_metadata_json"] if row else None)
+        self._attr_entity_picture = _image_url_from_metadata(row["artist_metadata_json"] if row else None)
 
 
 class RecentlyPlayedSyncSensor(CoordinatorEntity, SensorEntity):
