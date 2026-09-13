@@ -17,56 +17,69 @@ views:
     path: music-insights
     icon: mdi:music-box-multiple
     cards:
-      - type: tile
-        entity: sensor.spotify_flo_ue_currently_playing
-        name: Currently playing
-        vertical: false
-        show_entity_picture: true
+      - type: markdown
+        content: "### ▶️ Currently Playing"
 
-      - type: entities
-        title: Currently playing – Details
-        show_header_toggle: false
-        entities:
-          - type: attribute
-            entity: sensor.spotify_flo_ue_currently_playing
-            attribute: album
-            name: Album
-          - type: attribute
-            entity: sensor.spotify_flo_ue_currently_playing
-            attribute: device
-            name: Gerät
-          - type: attribute
-            entity: sensor.spotify_flo_ue_currently_playing
-            attribute: is_playing
-            name: Spielt gerade
-
-      - type: horizontal-stack
+      - type: vertical-stack
         cards:
           - type: tile
-            entity: sensor.spotify_flo_ue_listening_time_today
-            name: Heute
-            icon: mdi:clock-outline
-          - type: tile
-            entity: sensor.spotify_flo_ue_listening_time_this_year
-            name: Dieses Jahr
-            icon: mdi:calendar-clock
+            entity: sensor.spotify_flo_ue_currently_playing
+            name: Currently playing
+            vertical: false
+            show_entity_picture: true
+            icon: mdi:spotify
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - type: attribute
+                entity: sensor.spotify_flo_ue_currently_playing
+                attribute: album
+                name: Album
+                icon: mdi:album
+              - type: attribute
+                entity: sensor.spotify_flo_ue_currently_playing
+                attribute: device
+                name: Gerät
+                icon: mdi:cellphone-link
+              - type: attribute
+                entity: sensor.spotify_flo_ue_currently_playing
+                attribute: is_playing
+                name: Spielt gerade
+                icon: mdi:play-circle-outline
 
-      - type: entities
-        title: Jahresstatistik
-        show_header_toggle: false
-        entities:
-          - type: attribute
-            entity: sensor.spotify_flo_ue_listening_time_this_year
-            attribute: play_count
-            name: Wiedergaben
-          - type: attribute
-            entity: sensor.spotify_flo_ue_listening_time_this_year
-            attribute: unique_tracks
-            name: Unterschiedliche Songs
-          - type: attribute
-            entity: sensor.spotify_flo_ue_listening_time_this_year
-            attribute: unique_artists
-            name: Unterschiedliche Artists
+      - type: markdown
+        content: "### 📊 Jahresstatistik"
+
+      - type: vertical-stack
+        cards:
+          - type: horizontal-stack
+            cards:
+              - type: tile
+                entity: sensor.spotify_flo_ue_listening_time_today
+                name: Heute
+                icon: mdi:clock-outline
+              - type: tile
+                entity: sensor.spotify_flo_ue_listening_time_this_year
+                name: Dieses Jahr
+                icon: mdi:calendar-clock
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - type: attribute
+                entity: sensor.spotify_flo_ue_listening_time_this_year
+                attribute: play_count
+                name: Wiedergaben
+                icon: mdi:counter
+              - type: attribute
+                entity: sensor.spotify_flo_ue_listening_time_this_year
+                attribute: unique_tracks
+                name: Unterschiedliche Songs
+                icon: mdi:music-note-outline
+              - type: attribute
+                entity: sensor.spotify_flo_ue_listening_time_this_year
+                attribute: unique_artists
+                name: Unterschiedliche Artists
+                icon: mdi:account-music-outline
 
       - type: markdown
         content: "### 🎵 Top Songs"
@@ -114,9 +127,12 @@ views:
             vertical: true
             show_entity_picture: true
 
+      - type: markdown
+        content: "### 🔧 Diagnose"
+
       - type: entities
-        title: Diagnose
         show_header_toggle: false
         entities:
           - entity: sensor.spotify_flo_ue_recently_played_sync
             name: Letzter Abgleich
+            icon: mdi:sync
