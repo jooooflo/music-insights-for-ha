@@ -110,13 +110,12 @@ Scopes requested (and only these):
 2. Install "Music Insights (MI-HA)", restart HA, then continue from step 3
    above.
 
-Before publishing to HACS / a public GitHub repo:
+Repository: https://github.com/jooooflo/music-insights-for-ha (MIT licensed).
 
-- Replace the placeholder GitHub username in `custom_components/music_insights/manifest.json`
-  (`codeowners`, `documentation`, `issue_tracker`) and in `hacs.json` with
-  the real repository.
-- Add a `LICENSE` file (choose one — MIT is common for HACS integrations).
+Still open before submitting to the HACS default store:
+
 - Tag a release (`v0.1.0`) — HACS installs from GitHub releases/tags.
+- Add a repo description/topics and a few screenshots for the HACS listing.
 
 ## Testing checklist
 
