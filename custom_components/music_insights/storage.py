@@ -15,16 +15,23 @@ Design goals (see project README for the full rationale):
   coordinator, config flow, services) must invoke it via
   ``hass.async_add_executor_job``. This module contains no HA imports and
   no asyncio, which also makes it independently unit-testable.
+- Home Assistant's executor is a *pool* of worker threads, so several
+  entities/services can call into this store at the same moment. A single
+  ``sqlite3.Connection`` is not safe for concurrent use across threads
+  (even with ``check_same_thread=False``, which only disables the identity
+  check - it does not add locking), so every public method below acquires
+  ``self._lock`` to fully serialise access.
 """
 from __future__ import annotations
 
 import contextlib
 import dataclasses
+import functools
 import hashlib
 import json
 import logging
-import shutil
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -256,6 +263,25 @@ _MIGRATIONS: list[tuple[int, str]] = [
 ]
 
 
+def _locked(method):
+    """Serialise a method call through the store's instance lock.
+
+    Home Assistant dispatches executor jobs onto a thread *pool*, so
+    multiple entities/coordinators can end up calling into the same
+    ``MusicInsightsStore`` at once. ``RLock`` (not a plain ``Lock``) is
+    required because several locked methods call other locked methods
+    internally (e.g. ``record_play_session`` -> ``upsert_track`` ->
+    ``upsert_album``) from the same thread.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: "MusicInsightsStore", *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class MusicInsightsStore:
     """Synchronous SQLite storage engine. Must be called from an executor."""
 
@@ -263,9 +289,11 @@ class MusicInsightsStore:
         self._db_path = db_path
         self._backup_dir = backup_dir
         self._conn: sqlite3.Connection | None = None
+        self._lock = threading.RLock()
 
     # -- lifecycle ---------------------------------------------------------
 
+    @_locked
     def open(self) -> None:
         """Open the database, creating it and applying migrations if needed."""
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -280,11 +308,13 @@ class MusicInsightsStore:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA busy_timeout = 5000")
         self._conn = conn
 
         self._ensure_schema()
         self._seed_providers()
 
+    @_locked
     def close(self) -> None:
         if self._conn is not None:
             self._conn.close()
@@ -295,6 +325,16 @@ class MusicInsightsStore:
         if self._conn is None:
             raise RuntimeError("MusicInsightsStore.open() was not called")
         return self._conn
+
+    @_locked
+    def fetchone(self, sql: str, params: tuple = ()) -> sqlite3.Row | None:
+        """Run an ad-hoc, lock-protected SELECT for callers outside this module.
+
+        Prefer a dedicated method on this class for anything reused; this
+        exists so simple, one-off read queries (e.g. sensor state lookups)
+        don't need to reach into ``self.conn`` directly and bypass locking.
+        """
+        return self.conn.execute(sql, params).fetchone()
 
     # -- schema / migrations -------------------------------------------
 
@@ -355,6 +395,7 @@ class MusicInsightsStore:
 
     # -- integrity / maintenance ----------------------------------------
 
+    @_locked
     def run_integrity_check(self) -> dict[str, Any]:
         """Run SQLite's built-in integrity + foreign-key checks."""
         cur = self.conn.execute("PRAGMA integrity_check")
@@ -371,6 +412,7 @@ class MusicInsightsStore:
             _LOGGER.error("Music Insights: database integrity check FAILED: %s", result)
         return result
 
+    @_locked
     def create_snapshot(self) -> Path:
         """Create a consistent on-disk snapshot using SQLite's backup API."""
         self._backup_dir.mkdir(parents=True, exist_ok=True)
@@ -395,11 +437,13 @@ class MusicInsightsStore:
             with contextlib.suppress(OSError):
                 path.unlink()
 
+    @_locked
     def vacuum(self) -> None:
         self.conn.execute("VACUUM")
 
     # -- provider / account -----------------------------------------------
 
+    @_locked
     def get_provider_id(self, provider: str) -> int:
         row = self.conn.execute(
             "SELECT id FROM providers WHERE name = ?", (provider,)
@@ -412,6 +456,7 @@ class MusicInsightsStore:
             return cur.lastrowid
         return row["id"]
 
+    @_locked
     def upsert_account(
         self, provider: str, external_id: str, display_name: str | None
     ) -> int:
@@ -436,6 +481,7 @@ class MusicInsightsStore:
 
     # -- catalogue (artists / albums / tracks) -----------------------------
 
+    @_locked
     def upsert_artist(self, provider: str, external_id: str, name: str,
                        metadata: dict[str, Any] | None = None) -> int:
         provider_id = self.get_provider_id(provider)
@@ -457,6 +503,7 @@ class MusicInsightsStore:
             (provider_id, external_id),
         ).fetchone()["id"]
 
+    @_locked
     def upsert_album(self, provider: str, external_id: str, name: str,
                       release_date: str | None,
                       metadata: dict[str, Any] | None = None) -> int:
@@ -480,6 +527,7 @@ class MusicInsightsStore:
             (provider_id, external_id),
         ).fetchone()["id"]
 
+    @_locked
     def upsert_track(self, track: TrackData) -> int:
         provider_id = self.get_provider_id(track.provider)
         now = _now_iso()
@@ -543,6 +591,7 @@ class MusicInsightsStore:
 
     # -- play sessions -------------------------------------------------
 
+    @_locked
     def record_play_session(self, session: PlaySessionData) -> tuple[int, bool]:
         """Insert a play session. Returns (id, created). Deduplicated."""
         account_id = self.upsert_account(
@@ -620,6 +669,7 @@ class MusicInsightsStore:
 
     # -- top items -------------------------------------------------------
 
+    @_locked
     def replace_top_items(
         self,
         provider: str,
@@ -644,6 +694,7 @@ class MusicInsightsStore:
 
     # -- aggregate stats ---------------------------------------------------
 
+    @_locked
     def recompute_daily_stats(self, account_id: int, date: str) -> None:
         """Recompute daily_stats for one account/date from play_sessions."""
         row = self.conn.execute(
@@ -723,6 +774,7 @@ class MusicInsightsStore:
                 ),
             )
 
+    @_locked
     def recompute_yearly_stats(self, account_id: int, year: str) -> None:
         row = self.conn.execute(
             """
@@ -811,6 +863,7 @@ class MusicInsightsStore:
 
     # -- export / import -----------------------------------------------
 
+    @_locked
     def export_account_json(self, account_id: int) -> dict[str, Any]:
         """Export all data for one account as a JSON-serialisable dict."""
         sessions = [
@@ -843,6 +896,7 @@ class MusicInsightsStore:
             "yearly_stats": yearly,
         }
 
+    @_locked
     def import_legacy_jsonl(
         self, provider: str, account_external_id: str, lines: Iterable[str]
     ) -> dict[str, int]:

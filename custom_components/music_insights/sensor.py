@@ -138,10 +138,10 @@ class TodayListeningTimeSensor(_StoreBackedSensor):
         account_id = store.upsert_account("spotify", self._data.account_external_id, None)
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         store.recompute_daily_stats(account_id, today)
-        row = store.conn.execute(
+        row = store.fetchone(
             "SELECT total_ms, play_count FROM daily_stats WHERE account_id = ? AND date = ?",
             (account_id, today),
-        ).fetchone()
+        )
         if row:
             self._value = round(row["total_ms"] / 60000, 1)
             self._attrs = {"play_count": row["play_count"], "date": today}
@@ -166,11 +166,11 @@ class YearListeningTimeSensor(_StoreBackedSensor):
         account_id = store.upsert_account("spotify", self._data.account_external_id, None)
         year = datetime.now(timezone.utc).strftime("%Y")
         store.recompute_yearly_stats(account_id, year)
-        row = store.conn.execute(
+        row = store.fetchone(
             "SELECT total_ms, play_count, unique_tracks, unique_artists "
             "FROM yearly_stats WHERE account_id = ? AND year = ?",
             (account_id, year),
-        ).fetchone()
+        )
         if row:
             self._value = round(row["total_ms"] / 60000, 1)
             self._attrs = {
@@ -196,7 +196,7 @@ class TopTrackSensor(_StoreBackedSensor):
     def _refresh(self) -> None:
         store = self._data.store
         account_id = store.upsert_account("spotify", self._data.account_external_id, None)
-        row = store.conn.execute(
+        row = store.fetchone(
             """
             SELECT t.name AS track_name, t.id AS track_id
             FROM top_items_snapshots s
@@ -205,7 +205,7 @@ class TopTrackSensor(_StoreBackedSensor):
             ORDER BY s.captured_at DESC, s.rank ASC LIMIT 1
             """,
             (account_id, self._term),
-        ).fetchone()
+        )
         self._value = row["track_name"] if row else None
         self._attrs = {"term": self._term}
 
@@ -222,7 +222,7 @@ class TopArtistSensor(_StoreBackedSensor):
     def _refresh(self) -> None:
         store = self._data.store
         account_id = store.upsert_account("spotify", self._data.account_external_id, None)
-        row = store.conn.execute(
+        row = store.fetchone(
             """
             SELECT a.name AS artist_name
             FROM top_items_snapshots s
@@ -231,7 +231,7 @@ class TopArtistSensor(_StoreBackedSensor):
             ORDER BY s.captured_at DESC, s.rank ASC LIMIT 1
             """,
             (account_id, self._term),
-        ).fetchone()
+        )
         self._value = row["artist_name"] if row else None
         self._attrs = {"term": self._term}
 
