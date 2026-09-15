@@ -48,15 +48,20 @@ This is **outside** `custom_components/music_insights/`, so:
   Import of that format, and of other providers' exports, is a planned
   follow-up once the format has proven itself.
 
-## Data model (v0.1)
+## Data model (schema v2)
 
 | Table | Purpose |
 |---|---|
 | `providers`, `accounts` | One row per music service / connected account |
-| `artists`, `albums`, `tracks`, `track_artists` | Deduplicated catalogue, keyed by provider + external id |
+| `artists`, `albums`, `tracks`, `track_artists` | Deduplicated catalogue, keyed by provider + external id. Album/artist `metadata_json` carries a Spotify cover-art/photo URL when known. |
 | `play_sessions` | One row per listen: `started_at`, `ended_at`, `duration_ms`, `listened_ms`, `completion_percent`, `result` (`instant_skip`/`skip`/`play`/`complete`/`unknown`), `device`, `source`, `spotify_played_at` |
-| `daily_stats`, `yearly_stats` | Recomputed aggregates per account/day/year |
+| `daily_stats`, `monthly_stats`, `yearly_stats` | Recomputed aggregates per account/day/month/year: `total_ms`, `play_count`, `unique_tracks`, `unique_artists`, `top_track_id`, `top_artist_id`, `top_device` (day/month/year) and `top_hour` (day/month only - the local hour-of-day, 0-23, with the most listened minutes; converted from UTC using Home Assistant's configured timezone, since "time of day" is meaningless in UTC) |
 | `top_items_snapshots` | Spotify's short/medium/long-term top tracks & artists, captured over time |
+
+All-time superlatives ("top device ever", "best day ever", "best month
+ever") are computed on demand from `play_sessions`/`daily_stats`/
+`monthly_stats` rather than stored - see `get_all_time_top_device`,
+`get_top_day`, `get_top_month` in `storage.py`.
 
 `result` classification: a play under 3s counts as `instant_skip`; under
 50% of the track's duration is a `skip`; 90%+ is `complete`; otherwise

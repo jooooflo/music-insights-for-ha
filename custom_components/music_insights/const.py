@@ -92,7 +92,7 @@ EXPORT_DIR_NAME: Final = "exports"
 
 # Current application-level schema version. Bump together with a migration
 # function in storage.py's _MIGRATIONS list.
-SCHEMA_VERSION: Final = 1
+SCHEMA_VERSION: Final = 2
 
 # Default retention: unlimited (None = keep forever).
 DEFAULT_RETENTION_DAYS: Final = None

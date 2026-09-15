@@ -28,6 +28,21 @@ def _image_url_from_metadata(metadata_json: str | None) -> str | None:
         return None
 
 
+def _tageszeit_label(hour: int | None) -> str | None:
+    """Map a local hour-of-day (0-23) to a coarse German time-of-day label."""
+    if hour is None:
+        return None
+    if 5 <= hour < 11:
+        return "Vormittag"
+    if 11 <= hour < 14:
+        return "Mittag"
+    if 14 <= hour < 18:
+        return "Nachmittag"
+    if 18 <= hour < 23:
+        return "Abend"
+    return "Nacht"
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: MusicInsightsConfigEntry,
@@ -46,12 +61,19 @@ async def async_setup_entry(
     entities: list[SensorEntity] = [
         CurrentlyPlayingSensor(data.playback_coordinator, entry, device_info),
         TodayListeningTimeSensor(data, entry, device_info),
+        MonthListeningTimeSensor(data, entry, device_info),
         YearListeningTimeSensor(data, entry, device_info),
+        TopDeviceSensor(data, entry, device_info),
+        TopDaySensor(data, entry, device_info),
+        TopMonthSensor(data, entry, device_info),
         RecentlyPlayedSyncSensor(data.recently_played_coordinator, entry, device_info),
     ]
     for term in TOP_ITEM_TERMS:
         entities.append(TopTrackSensor(data, entry, device_info, term=term))
         entities.append(TopArtistSensor(data, entry, device_info, term=term))
+    for period in ("today", "this_month"):
+        entities.append(PeriodTopTrackSensor(data, entry, device_info, period=period))
+        entities.append(PeriodTopArtistSensor(data, entry, device_info, period=period))
     async_add_entities(entities)
 
 
@@ -158,17 +180,61 @@ class TodayListeningTimeSensor(_StoreBackedSensor):
         store = self._data.store
         account_id = store.upsert_account("spotify", self._data.account_external_id, None)
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        store.recompute_daily_stats(account_id, today)
+        store.recompute_daily_stats(account_id, today, self.hass.config.time_zone)
         row = store.fetchone(
-            "SELECT total_ms, play_count FROM daily_stats WHERE account_id = ? AND date = ?",
+            "SELECT total_ms, play_count, top_device, top_hour "
+            "FROM daily_stats WHERE account_id = ? AND date = ?",
             (account_id, today),
         )
         if row:
             self._value = round(row["total_ms"] / 60000, 1)
-            self._attrs = {"play_count": row["play_count"], "date": today}
+            self._attrs = {
+                "play_count": row["play_count"],
+                "date": today,
+                "top_device": row["top_device"],
+                "top_hour": row["top_hour"],
+                "tageszeit": _tageszeit_label(row["top_hour"]),
+            }
         else:
             self._value = 0
             self._attrs = {"play_count": 0, "date": today}
+
+
+class MonthListeningTimeSensor(_StoreBackedSensor):
+    _attr_name = "Listening time this month"
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:calendar-month"
+
+    def __init__(self, data, entry, device_info) -> None:
+        super().__init__(data, entry, device_info)
+        self._attr_unique_id = f"{entry.entry_id}_listening_time_month"
+
+    def _refresh(self) -> None:
+        store = self._data.store
+        account_id = store.upsert_account("spotify", self._data.account_external_id, None)
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+        store.recompute_monthly_stats(account_id, month, self.hass.config.time_zone)
+        row = store.fetchone(
+            "SELECT total_ms, play_count, unique_tracks, unique_artists, top_device, top_hour "
+            "FROM monthly_stats WHERE account_id = ? AND month = ?",
+            (account_id, month),
+        )
+        if row:
+            self._value = round(row["total_ms"] / 60000, 1)
+            self._attrs = {
+                "play_count": row["play_count"],
+                "unique_tracks": row["unique_tracks"],
+                "unique_artists": row["unique_artists"],
+                "month": month,
+                "top_device": row["top_device"],
+                "top_hour": row["top_hour"],
+                "tageszeit": _tageszeit_label(row["top_hour"]),
+            }
+        else:
+            self._value = 0
+            self._attrs = {"month": month}
 
 
 class YearListeningTimeSensor(_StoreBackedSensor):
@@ -188,7 +254,7 @@ class YearListeningTimeSensor(_StoreBackedSensor):
         year = datetime.now(timezone.utc).strftime("%Y")
         store.recompute_yearly_stats(account_id, year)
         row = store.fetchone(
-            "SELECT total_ms, play_count, unique_tracks, unique_artists "
+            "SELECT total_ms, play_count, unique_tracks, unique_artists, top_device "
             "FROM yearly_stats WHERE account_id = ? AND year = ?",
             (account_id, year),
         )
@@ -199,6 +265,7 @@ class YearListeningTimeSensor(_StoreBackedSensor):
                 "unique_tracks": row["unique_tracks"],
                 "unique_artists": row["unique_artists"],
                 "year": year,
+                "top_device": row["top_device"],
             }
         else:
             self._value = 0
@@ -258,6 +325,150 @@ class TopArtistSensor(_StoreBackedSensor):
         self._value = row["artist_name"] if row else None
         self._attrs = {"term": self._term}
         self._attr_entity_picture = _image_url_from_metadata(row["artist_metadata_json"] if row else None)
+
+
+_PERIOD_NAMES = {"today": "heute", "this_month": "diesen Monat"}
+
+
+class PeriodTopTrackSensor(_StoreBackedSensor):
+    """Most-listened track for a rolling period, from our own play_sessions
+
+    (as opposed to TopTrackSensor, which mirrors Spotify's own short/medium/
+    long-term top-items algorithm from their API).
+    """
+
+    _attr_icon = "mdi:music-note"
+
+    def __init__(self, data, entry, device_info, period: str) -> None:
+        super().__init__(data, entry, device_info)
+        self._period = period
+        self._attr_name = f"Top track ({_PERIOD_NAMES[period]})"
+        self._attr_unique_id = f"{entry.entry_id}_top_track_period_{period}"
+
+    def _refresh(self) -> None:
+        store = self._data.store
+        account_id = store.upsert_account("spotify", self._data.account_external_id, None)
+        tz_name = self.hass.config.time_zone
+        if self._period == "today":
+            key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            store.recompute_daily_stats(account_id, key, tz_name)
+            table, column = "daily_stats", "date"
+        else:
+            key = datetime.now(timezone.utc).strftime("%Y-%m")
+            store.recompute_monthly_stats(account_id, key, tz_name)
+            table, column = "monthly_stats", "month"
+
+        row = store.fetchone(
+            f"""
+            SELECT t.name AS track_name, al.metadata_json AS album_metadata_json
+            FROM {table} p
+            JOIN tracks t ON t.id = p.top_track_id
+            LEFT JOIN albums al ON al.id = t.album_id
+            WHERE p.account_id = ? AND p.{column} = ?
+            """,
+            (account_id, key),
+        )
+        self._value = row["track_name"] if row else None
+        self._attrs = {"period": self._period}
+        self._attr_entity_picture = _image_url_from_metadata(row["album_metadata_json"] if row else None)
+
+
+class PeriodTopArtistSensor(_StoreBackedSensor):
+    """Most-listened artist for a rolling period, from our own play_sessions."""
+
+    _attr_icon = "mdi:account-music"
+
+    def __init__(self, data, entry, device_info, period: str) -> None:
+        super().__init__(data, entry, device_info)
+        self._period = period
+        self._attr_name = f"Top artist ({_PERIOD_NAMES[period]})"
+        self._attr_unique_id = f"{entry.entry_id}_top_artist_period_{period}"
+
+    def _refresh(self) -> None:
+        store = self._data.store
+        account_id = store.upsert_account("spotify", self._data.account_external_id, None)
+        tz_name = self.hass.config.time_zone
+        if self._period == "today":
+            key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            store.recompute_daily_stats(account_id, key, tz_name)
+            table, column = "daily_stats", "date"
+        else:
+            key = datetime.now(timezone.utc).strftime("%Y-%m")
+            store.recompute_monthly_stats(account_id, key, tz_name)
+            table, column = "monthly_stats", "month"
+
+        row = store.fetchone(
+            f"""
+            SELECT a.name AS artist_name, a.metadata_json AS artist_metadata_json
+            FROM {table} p
+            JOIN artists a ON a.id = p.top_artist_id
+            WHERE p.account_id = ? AND p.{column} = ?
+            """,
+            (account_id, key),
+        )
+        self._value = row["artist_name"] if row else None
+        self._attrs = {"period": self._period}
+        self._attr_entity_picture = _image_url_from_metadata(row["artist_metadata_json"] if row else None)
+
+
+class TopDeviceSensor(_StoreBackedSensor):
+    """The device with the most listened minutes across all history."""
+
+    _attr_name = "Top device (all time)"
+    _attr_icon = "mdi:cellphone-link"
+
+    def __init__(self, data, entry, device_info) -> None:
+        super().__init__(data, entry, device_info)
+        self._attr_unique_id = f"{entry.entry_id}_top_device_all_time"
+
+    def _refresh(self) -> None:
+        store = self._data.store
+        account_id = store.upsert_account("spotify", self._data.account_external_id, None)
+        self._value = store.get_all_time_top_device(account_id)
+
+
+class TopDaySensor(_StoreBackedSensor):
+    """The single best day ever, by listening minutes."""
+
+    _attr_name = "Top day"
+    _attr_icon = "mdi:calendar-star"
+
+    def __init__(self, data, entry, device_info) -> None:
+        super().__init__(data, entry, device_info)
+        self._attr_unique_id = f"{entry.entry_id}_top_day"
+
+    def _refresh(self) -> None:
+        store = self._data.store
+        account_id = store.upsert_account("spotify", self._data.account_external_id, None)
+        row = store.get_top_day(account_id)
+        self._value = row["date"] if row else None
+        self._attrs = (
+            {"minutes": round(row["total_ms"] / 60000, 1), "play_count": row["play_count"]}
+            if row
+            else {}
+        )
+
+
+class TopMonthSensor(_StoreBackedSensor):
+    """The single best month ever, by listening minutes."""
+
+    _attr_name = "Top month"
+    _attr_icon = "mdi:calendar-star"
+
+    def __init__(self, data, entry, device_info) -> None:
+        super().__init__(data, entry, device_info)
+        self._attr_unique_id = f"{entry.entry_id}_top_month"
+
+    def _refresh(self) -> None:
+        store = self._data.store
+        account_id = store.upsert_account("spotify", self._data.account_external_id, None)
+        row = store.get_top_month(account_id)
+        self._value = row["month"] if row else None
+        self._attrs = (
+            {"minutes": round(row["total_ms"] / 60000, 1), "play_count": row["play_count"]}
+            if row
+            else {}
+        )
 
 
 class RecentlyPlayedSyncSensor(CoordinatorEntity, SensorEntity):

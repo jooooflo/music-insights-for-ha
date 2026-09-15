@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import datetime as _dt
 import functools
 import hashlib
 import json
@@ -35,6 +36,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Iterable, Sequence
+from zoneinfo import ZoneInfo
 
 from .const import (
     COMPLETE_THRESHOLD_PERCENT,
@@ -112,6 +114,36 @@ def classify_result(listened_ms: int, duration_ms: int | None) -> str:
 def _dedup_hash(account_id: int, track_id: int, started_at: str) -> str:
     raw = f"{account_id}:{track_id}:{started_at}".encode()
     return hashlib.sha256(raw).hexdigest()
+
+
+def _top_hour_local(rows: Iterable[sqlite3.Row], tz_name: str) -> int | None:
+    """Return the local hour-of-day (0-23) with the most listened_ms.
+
+    ``started_at`` is always stored in UTC; "time of day" is meaningless
+    without converting to the listener's own timezone first, so this bucket
+    is computed in Python rather than via SQL (SQLite has no timezone
+    database). ``rows`` must have ``started_at`` and ``listened_ms`` columns.
+    """
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:  # noqa: BLE001 - fall back to UTC on any bad/missing tz
+        tz = _dt.timezone.utc
+
+    buckets: dict[int, int] = {}
+    for row in rows:
+        started_at = row["started_at"]
+        if not started_at:
+            continue
+        try:
+            started = _dt.datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        local_hour = started.astimezone(tz).hour
+        buckets[local_hour] = buckets.get(local_hour, 0) + (row["listened_ms"] or 0)
+
+    if not buckets:
+        return None
+    return max(buckets, key=buckets.get)
 
 
 # --------------------------------------------------------------------------
@@ -223,8 +255,26 @@ CREATE TABLE IF NOT EXISTS daily_stats (
     unique_artists INTEGER NOT NULL DEFAULT 0,
     top_track_id INTEGER REFERENCES tracks(id),
     top_artist_id INTEGER REFERENCES artists(id),
+    top_device TEXT,
+    top_hour INTEGER,
     computed_at TEXT NOT NULL,
     UNIQUE(account_id, date)
+);
+
+CREATE TABLE IF NOT EXISTS monthly_stats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES accounts(id),
+    month TEXT NOT NULL,
+    total_ms INTEGER NOT NULL DEFAULT 0,
+    play_count INTEGER NOT NULL DEFAULT 0,
+    unique_tracks INTEGER NOT NULL DEFAULT 0,
+    unique_artists INTEGER NOT NULL DEFAULT 0,
+    top_track_id INTEGER REFERENCES tracks(id),
+    top_artist_id INTEGER REFERENCES artists(id),
+    top_device TEXT,
+    top_hour INTEGER,
+    computed_at TEXT NOT NULL,
+    UNIQUE(account_id, month)
 );
 
 CREATE TABLE IF NOT EXISTS yearly_stats (
@@ -237,6 +287,7 @@ CREATE TABLE IF NOT EXISTS yearly_stats (
     unique_artists INTEGER NOT NULL DEFAULT 0,
     top_track_id INTEGER REFERENCES tracks(id),
     top_artist_id INTEGER REFERENCES artists(id),
+    top_device TEXT,
     computed_at TEXT NOT NULL,
     UNIQUE(account_id, year)
 );
@@ -256,11 +307,37 @@ CREATE INDEX IF NOT EXISTS idx_top_items_lookup
 """
 
 
-# Ordered list of (version, sql | callable) migrations. Version 1 is the
-# baseline schema above and is applied by _ensure_schema before this list
-# runs, so the list only needs entries for version >= 2 going forward.
+# Ordered list of (version, sql) migrations. Version 1 is the baseline
+# schema above and is applied by _ensure_schema before this list runs, so
+# the list only needs entries for version >= 2 going forward. _SCHEMA_SQL
+# above already reflects the fully-migrated schema (for fresh installs);
+# each entry here is what brings an *existing* database from the previous
+# version up to that same shape, since `CREATE TABLE IF NOT EXISTS` is a
+# no-op against a table that already exists with the old column set.
 _MIGRATIONS: list[tuple[int, str]] = [
-    # (2, "ALTER TABLE ... "),  # example for the next schema change
+    (
+        2,
+        """
+        ALTER TABLE daily_stats ADD COLUMN top_device TEXT;
+        ALTER TABLE daily_stats ADD COLUMN top_hour INTEGER;
+        ALTER TABLE yearly_stats ADD COLUMN top_device TEXT;
+        CREATE TABLE IF NOT EXISTS monthly_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_id INTEGER NOT NULL REFERENCES accounts(id),
+            month TEXT NOT NULL,
+            total_ms INTEGER NOT NULL DEFAULT 0,
+            play_count INTEGER NOT NULL DEFAULT 0,
+            unique_tracks INTEGER NOT NULL DEFAULT 0,
+            unique_artists INTEGER NOT NULL DEFAULT 0,
+            top_track_id INTEGER REFERENCES tracks(id),
+            top_artist_id INTEGER REFERENCES artists(id),
+            top_device TEXT,
+            top_hour INTEGER,
+            computed_at TEXT NOT NULL,
+            UNIQUE(account_id, month)
+        );
+        """,
+    ),
 ]
 
 
@@ -700,8 +777,14 @@ class MusicInsightsStore:
     # -- aggregate stats ---------------------------------------------------
 
     @_locked
-    def recompute_daily_stats(self, account_id: int, date: str) -> None:
-        """Recompute daily_stats for one account/date from play_sessions."""
+    def recompute_daily_stats(self, account_id: int, date: str, tz_name: str = "UTC") -> None:
+        """Recompute daily_stats for one account/date from play_sessions.
+
+        ``date`` groups sessions by their UTC start (``substr(started_at,1,10)``,
+        consistent with how "this year" already groups by ``substr(...,1,4)``).
+        Only ``top_hour`` is converted to ``tz_name`` (Home Assistant's local
+        timezone), since "time of day" is meaningless in UTC.
+        """
         row = self.conn.execute(
             """
             SELECT
@@ -749,14 +832,37 @@ class MusicInsightsStore:
             (account_id, date),
         ).fetchone()
 
+        top_device_row = self.conn.execute(
+            """
+            SELECT device, SUM(listened_ms) AS ms
+            FROM play_sessions
+            WHERE account_id = ? AND substr(started_at, 1, 10) = ?
+              AND result != 'instant_skip' AND device IS NOT NULL AND device != ''
+            GROUP BY device ORDER BY ms DESC LIMIT 1
+            """,
+            (account_id, date),
+        ).fetchone()
+
+        hour_rows = self.conn.execute(
+            """
+            SELECT started_at, listened_ms
+            FROM play_sessions
+            WHERE account_id = ? AND substr(started_at, 1, 10) = ?
+              AND result != 'instant_skip'
+            """,
+            (account_id, date),
+        ).fetchall()
+        top_hour = _top_hour_local(hour_rows, tz_name)
+
         now = _now_iso()
         with self.conn:
             self.conn.execute(
                 """
                 INSERT INTO daily_stats (
                     account_id, date, total_ms, play_count, unique_tracks,
-                    unique_artists, top_track_id, top_artist_id, computed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    unique_artists, top_track_id, top_artist_id, top_device,
+                    top_hour, computed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(account_id, date) DO UPDATE SET
                     total_ms = excluded.total_ms,
                     play_count = excluded.play_count,
@@ -764,6 +870,8 @@ class MusicInsightsStore:
                     unique_artists = excluded.unique_artists,
                     top_track_id = excluded.top_track_id,
                     top_artist_id = excluded.top_artist_id,
+                    top_device = excluded.top_device,
+                    top_hour = excluded.top_hour,
                     computed_at = excluded.computed_at
                 """,
                 (
@@ -775,6 +883,115 @@ class MusicInsightsStore:
                     unique_artists_row["unique_artists"],
                     top_track_row["track_id"] if top_track_row else None,
                     top_artist_row["artist_id"] if top_artist_row else None,
+                    top_device_row["device"] if top_device_row else None,
+                    top_hour,
+                    now,
+                ),
+            )
+
+    @_locked
+    def recompute_monthly_stats(self, account_id: int, month: str, tz_name: str = "UTC") -> None:
+        """Recompute monthly_stats for one account/month (``YYYY-MM``)."""
+        row = self.conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(listened_ms), 0) AS total_ms,
+                COUNT(*) AS play_count,
+                COUNT(DISTINCT track_id) AS unique_tracks
+            FROM play_sessions
+            WHERE account_id = ? AND substr(started_at, 1, 7) = ?
+              AND result != 'instant_skip'
+            """,
+            (account_id, month),
+        ).fetchone()
+
+        unique_artists_row = self.conn.execute(
+            """
+            SELECT COUNT(DISTINCT ta.artist_id) AS unique_artists
+            FROM play_sessions ps
+            JOIN track_artists ta ON ta.track_id = ps.track_id
+            WHERE ps.account_id = ? AND substr(ps.started_at, 1, 7) = ?
+              AND ps.result != 'instant_skip'
+            """,
+            (account_id, month),
+        ).fetchone()
+
+        top_track_row = self.conn.execute(
+            """
+            SELECT track_id, SUM(listened_ms) AS ms
+            FROM play_sessions
+            WHERE account_id = ? AND substr(started_at, 1, 7) = ?
+              AND result != 'instant_skip'
+            GROUP BY track_id ORDER BY ms DESC LIMIT 1
+            """,
+            (account_id, month),
+        ).fetchone()
+
+        top_artist_row = self.conn.execute(
+            """
+            SELECT ta.artist_id AS artist_id, SUM(ps.listened_ms) AS ms
+            FROM play_sessions ps
+            JOIN track_artists ta ON ta.track_id = ps.track_id
+            WHERE ps.account_id = ? AND substr(ps.started_at, 1, 7) = ?
+              AND ps.result != 'instant_skip'
+            GROUP BY ta.artist_id ORDER BY ms DESC LIMIT 1
+            """,
+            (account_id, month),
+        ).fetchone()
+
+        top_device_row = self.conn.execute(
+            """
+            SELECT device, SUM(listened_ms) AS ms
+            FROM play_sessions
+            WHERE account_id = ? AND substr(started_at, 1, 7) = ?
+              AND result != 'instant_skip' AND device IS NOT NULL AND device != ''
+            GROUP BY device ORDER BY ms DESC LIMIT 1
+            """,
+            (account_id, month),
+        ).fetchone()
+
+        hour_rows = self.conn.execute(
+            """
+            SELECT started_at, listened_ms
+            FROM play_sessions
+            WHERE account_id = ? AND substr(started_at, 1, 7) = ?
+              AND result != 'instant_skip'
+            """,
+            (account_id, month),
+        ).fetchall()
+        top_hour = _top_hour_local(hour_rows, tz_name)
+
+        now = _now_iso()
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO monthly_stats (
+                    account_id, month, total_ms, play_count, unique_tracks,
+                    unique_artists, top_track_id, top_artist_id, top_device,
+                    top_hour, computed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(account_id, month) DO UPDATE SET
+                    total_ms = excluded.total_ms,
+                    play_count = excluded.play_count,
+                    unique_tracks = excluded.unique_tracks,
+                    unique_artists = excluded.unique_artists,
+                    top_track_id = excluded.top_track_id,
+                    top_artist_id = excluded.top_artist_id,
+                    top_device = excluded.top_device,
+                    top_hour = excluded.top_hour,
+                    computed_at = excluded.computed_at
+                """,
+                (
+                    account_id,
+                    month,
+                    row["total_ms"],
+                    row["play_count"],
+                    row["unique_tracks"],
+                    unique_artists_row["unique_artists"],
+                    top_track_row["track_id"] if top_track_row else None,
+                    top_artist_row["artist_id"] if top_artist_row else None,
+                    top_device_row["device"] if top_device_row else None,
+                    top_hour,
                     now,
                 ),
             )
@@ -836,14 +1053,26 @@ class MusicInsightsStore:
             (account_id, year),
         ).fetchone()
 
+        top_device_row = self.conn.execute(
+            """
+            SELECT device, SUM(listened_ms) AS ms
+            FROM play_sessions
+            WHERE account_id = ? AND substr(started_at, 1, 4) = ?
+              AND result != 'instant_skip' AND device IS NOT NULL AND device != ''
+            GROUP BY device ORDER BY ms DESC LIMIT 1
+            """,
+            (account_id, year),
+        ).fetchone()
+
         now = _now_iso()
         with self.conn:
             self.conn.execute(
                 """
                 INSERT INTO yearly_stats (
                     account_id, year, total_ms, play_count, unique_tracks,
-                    unique_artists, top_track_id, top_artist_id, computed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    unique_artists, top_track_id, top_artist_id, top_device,
+                    computed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(account_id, year) DO UPDATE SET
                     total_ms = excluded.total_ms,
                     play_count = excluded.play_count,
@@ -851,6 +1080,7 @@ class MusicInsightsStore:
                     unique_artists = excluded.unique_artists,
                     top_track_id = excluded.top_track_id,
                     top_artist_id = excluded.top_artist_id,
+                    top_device = excluded.top_device,
                     computed_at = excluded.computed_at
                 """,
                 (
@@ -862,9 +1092,45 @@ class MusicInsightsStore:
                     unique_artists_row["unique_artists"],
                     top_track_row["track_id"] if top_track_row else None,
                     top_artist_row["artist_id"] if top_artist_row else None,
+                    top_device_row["device"] if top_device_row else None,
                     now,
                 ),
             )
+
+    # -- all-time superlatives -------------------------------------------
+
+    @_locked
+    def get_all_time_top_device(self, account_id: int) -> str | None:
+        """Return the device with the most listened_ms across all history."""
+        row = self.conn.execute(
+            """
+            SELECT device, SUM(listened_ms) AS ms
+            FROM play_sessions
+            WHERE account_id = ? AND result != 'instant_skip'
+              AND device IS NOT NULL AND device != ''
+            GROUP BY device ORDER BY ms DESC LIMIT 1
+            """,
+            (account_id,),
+        ).fetchone()
+        return row["device"] if row else None
+
+    @_locked
+    def get_top_day(self, account_id: int) -> sqlite3.Row | None:
+        """Return the daily_stats row with the highest total_ms ever."""
+        return self.conn.execute(
+            "SELECT * FROM daily_stats WHERE account_id = ? "
+            "ORDER BY total_ms DESC LIMIT 1",
+            (account_id,),
+        ).fetchone()
+
+    @_locked
+    def get_top_month(self, account_id: int) -> sqlite3.Row | None:
+        """Return the monthly_stats row with the highest total_ms ever."""
+        return self.conn.execute(
+            "SELECT * FROM monthly_stats WHERE account_id = ? "
+            "ORDER BY total_ms DESC LIMIT 1",
+            (account_id,),
+        ).fetchone()
 
     # -- export / import -----------------------------------------------
 

@@ -188,11 +188,14 @@ class MusicInsightsPlaybackCoordinator(DataUpdateCoordinator[dict]):
             spotify_played_at=None,
         )
 
+        tz_name = self.hass.config.time_zone
+
         def _write() -> None:
             self._store.record_play_session(session)
             account_id = self._store.upsert_account("spotify", self._account_external_id, None)
             today = self._active_started_at[:10] if self._active_started_at else _now_iso()[:10]
-            self._store.recompute_daily_stats(account_id, today)
+            self._store.recompute_daily_stats(account_id, today, tz_name)
+            self._store.recompute_monthly_stats(account_id, today[:7], tz_name)
             self._store.recompute_yearly_stats(account_id, today[:4])
 
         await self.hass.async_add_executor_job(_write)
@@ -225,6 +228,7 @@ class MusicInsightsRecentlyPlayedCoordinator(DataUpdateCoordinator[dict]):
             raise UpdateFailed(str(err)) from err
 
         items = data.get("items", [])
+        tz_name = self.hass.config.time_zone
 
         def _write() -> int:
             imported = 0
@@ -256,7 +260,8 @@ class MusicInsightsRecentlyPlayedCoordinator(DataUpdateCoordinator[dict]):
                 )
                 affected_dates = {e["played_at"][:10] for e in items if e.get("played_at")}
                 for date in affected_dates:
-                    self._store.recompute_daily_stats(account_id, date)
+                    self._store.recompute_daily_stats(account_id, date, tz_name)
+                    self._store.recompute_monthly_stats(account_id, date[:7], tz_name)
                     self._store.recompute_yearly_stats(account_id, date[:4])
             return imported
 
