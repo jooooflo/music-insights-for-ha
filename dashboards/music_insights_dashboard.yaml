@@ -82,12 +82,60 @@ views:
                 icon: mdi:account-music-outline
 
       - type: markdown
+        content: "### 📅 Diesen Monat"
+
+      - type: vertical-stack
+        cards:
+          - type: tile
+            entity: sensor.garage_spotify_flo_ue_listening_time_this_month
+            name: Diesen Monat
+            icon: mdi:calendar-month
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - type: attribute
+                entity: sensor.garage_spotify_flo_ue_listening_time_this_month
+                attribute: play_count
+                name: Wiedergaben
+                icon: mdi:counter
+              - type: attribute
+                entity: sensor.garage_spotify_flo_ue_listening_time_this_month
+                attribute: unique_tracks
+                name: Unterschiedliche Songs
+                icon: mdi:music-note-outline
+              - type: attribute
+                entity: sensor.garage_spotify_flo_ue_listening_time_this_month
+                attribute: unique_artists
+                name: Unterschiedliche Artists
+                icon: mdi:account-music-outline
+              - type: attribute
+                entity: sensor.garage_spotify_flo_ue_listening_time_this_month
+                attribute: top_device
+                name: Top Gerät
+                icon: mdi:cellphone-link
+              - type: attribute
+                entity: sensor.garage_spotify_flo_ue_listening_time_this_month
+                attribute: tageszeit
+                name: Meiste Tageszeit
+                icon: mdi:clock-time-four-outline
+
+      - type: markdown
         content: "### 🎵 Top Songs"
 
       - type: grid
         columns: 3
         square: true
         cards:
+          - type: tile
+            entity: sensor.garage_spotify_flo_ue_top_track_heute
+            name: Heute
+            vertical: true
+            show_entity_picture: true
+          - type: tile
+            entity: sensor.garage_spotify_flo_ue_top_track_diesen_monat
+            name: Diesen Monat
+            vertical: true
+            show_entity_picture: true
           - type: tile
             entity: sensor.spotify_flo_ue_top_track_short_term
             name: 4 Wochen
@@ -112,6 +160,16 @@ views:
         square: true
         cards:
           - type: tile
+            entity: sensor.garage_spotify_flo_ue_top_artist_heute
+            name: Heute
+            vertical: true
+            show_entity_picture: true
+          - type: tile
+            entity: sensor.garage_spotify_flo_ue_top_artist_diesen_monat
+            name: Diesen Monat
+            vertical: true
+            show_entity_picture: true
+          - type: tile
             entity: sensor.spotify_flo_ue_top_artist_short_term
             name: 4 Wochen
             vertical: true
@@ -126,6 +184,32 @@ views:
             name: Gesamt
             vertical: true
             show_entity_picture: true
+
+      - type: markdown
+        content: "### 🏆 Rekorde"
+
+      - type: entities
+        show_header_toggle: false
+        entities:
+          - entity: sensor.garage_spotify_flo_ue_top_device_all_time
+            name: Top Gerät (insgesamt)
+            icon: mdi:cellphone-link
+          - entity: sensor.garage_spotify_flo_ue_top_day
+            name: Top Tag
+            icon: mdi:calendar-star
+          - type: attribute
+            entity: sensor.garage_spotify_flo_ue_top_day
+            attribute: minutes
+            name: Minuten am Top-Tag
+            icon: mdi:clock-outline
+          - entity: sensor.garage_spotify_flo_ue_top_month
+            name: Top Monat
+            icon: mdi:calendar-star
+          - type: attribute
+            entity: sensor.garage_spotify_flo_ue_top_month
+            attribute: minutes
+            name: Minuten im Top-Monat
+            icon: mdi:clock-outline
 
       - type: markdown
         content: "### 🔧 Diagnose"
